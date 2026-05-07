@@ -17,7 +17,6 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.routes import auth, documents, query
-from app.cache.redis_client import get_redis_cache
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import create_tables
@@ -43,10 +42,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     vs = get_vector_store()
     await vs.ensure_collection()
 
-    # Verify Redis connectivity
-    cache = get_redis_cache()
-    redis_ok = await cache.ping()
-    log.info("redis_connectivity", ok=redis_ok)
+    # Cache is in-memory now
+    log.info("local_cache_initialized", ok=True)
 
     log.info("app_ready", docs_url=f"{settings.api_v1_prefix}/docs")
     yield
@@ -171,18 +168,10 @@ def _register_utility_routes(app: FastAPI) -> None:
         from app.db.models import Document
         from app.db.session import AsyncSessionLocal
 
-        cache = get_redis_cache()
-        vs = get_vector_store()
-
-        # DB stats
-        async with AsyncSessionLocal() as db:
-            doc_count: int = (
-                await db.execute(select(func.count(Document.id)))
-            ).scalar_one()
-
-        # Redis counters
-        query_count_raw = await cache.get("metrics:query_count")
-        cache_hits_raw = await cache.get("metrics:cache_hits")
+        # Local cache counters (not persisting across restarts)
+        from app.cache.local_cache import get_cache
+        query_count_raw = await get_cache("metrics:query_count")
+        cache_hits_raw = await get_cache("metrics:cache_hits")
         query_count = int(query_count_raw or 0)
         cache_hits = int(cache_hits_raw or 0)
         cache_hit_rate = round(cache_hits / max(query_count, 1), 4)

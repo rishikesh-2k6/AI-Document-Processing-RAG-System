@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, DBSession
 from app.cache.local_cache import generate_cache_key, get_cache, set_cache
+from app.core.config import settings
+from app.core.logging import get_logger
 from app.db.models import Document, DocumentChunk, JobStatus, QueryLog
 from app.generation.answer import RAGAnswerGenerator
 from app.generation.summarizer import DocumentSummarizer

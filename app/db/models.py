@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 from enum import Enum as PyEnum
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -13,11 +13,12 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -128,7 +129,7 @@ class Document(Base):
     word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Extra metadata (author, subject, creation date from file)
-    doc_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    doc_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
@@ -198,11 +199,11 @@ class QueryLog(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     query_text: Mapped[str] = mapped_column(Text, nullable=False)
-    filters: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    filters: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     top_k: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     answer_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     confidence_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    source_chunks: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    source_chunks: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     cache_hit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

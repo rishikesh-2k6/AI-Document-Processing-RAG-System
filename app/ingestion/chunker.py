@@ -3,16 +3,13 @@
 The chunker works in two passes:
 1. Split on paragraph / sentence boundaries to keep semantic units intact.
 2. If any resulting piece still exceeds *chunk_size*, split on whitespace.
-Token counting uses tiktoken (cl100k_base) for accuracy.
+Token counting uses an approximation heuristic (1 word ≈ 1.3 tokens).
 """
 
 from __future__ import annotations
 
 import hashlib
-import re
 from dataclasses import dataclass
-
-import tiktoken
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -20,16 +17,14 @@ from app.ingestion.parsers import ParsedDocument
 
 log = get_logger(__name__)
 
-# Use the same tokenizer as modern OpenAI / Groq models
-_tokenizer = tiktoken.get_encoding("cl100k_base")
-
 # Separator hierarchy (high → low priority)
 _SEPARATORS = ["\n\n\n", "\n\n", "\n", ". ", "? ", "! ", " ", ""]
 
 
 def _count_tokens(text: str) -> int:
-    """Return token count for *text* using cl100k_base encoding."""
-    return len(_tokenizer.encode(text))
+    """Return an approximate token count for the text (heuristic)."""
+    # 1 word ~ 1.3 tokens for English text
+    return int(len(text.split()) * 1.3)
 
 
 @dataclass
@@ -86,12 +81,17 @@ class RecursiveCharacterChunker:
         # Try each separator in order
         for sep in separators:
             if sep == "":
-                # Last resort: hard split by token count
-                tokens = _tokenizer.encode(text)
+                # Last resort: hard split by token count (approximated by words)
+                words = text.split()
+                word_chunk_size = int(self.chunk_size / 1.3)
+                word_overlap = int(self.chunk_overlap / 1.3)
+                if word_chunk_size <= word_overlap:
+                    word_chunk_size = word_overlap + 1
+                    
                 parts = []
-                for i in range(0, len(tokens), self.chunk_size - self.chunk_overlap):
-                    part_tokens = tokens[i : i + self.chunk_size]
-                    parts.append(_tokenizer.decode(part_tokens))
+                for i in range(0, max(1, len(words)), max(1, word_chunk_size - word_overlap)):
+                    part_words = words[i : i + word_chunk_size]
+                    parts.append(" ".join(part_words))
                 return parts
 
             splits = text.split(sep)
@@ -134,8 +134,8 @@ class RecursiveCharacterChunker:
                 if current:
                     merged.append((current, page_number))
                     # Build overlap from tail of current chunk
-                    tail_tokens = _tokenizer.encode(current)[-self.chunk_overlap :]
-                    overlap_buffer = _tokenizer.decode(tail_tokens)
+                    word_overlap = int(self.chunk_overlap / 1.3)
+                    overlap_buffer = " ".join(current.split()[-word_overlap :]) if word_overlap > 0 else ""
                 current = (overlap_buffer + "\n" + piece).strip() if overlap_buffer else piece
                 overlap_buffer = ""
 
