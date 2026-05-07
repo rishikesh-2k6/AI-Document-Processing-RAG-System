@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "rag-doc-system"
@@ -14,7 +14,6 @@ dependencies = [
     # ── Web Framework ──────────────────────────────────────────────────────────
     "fastapi==0.110.3",
     "uvicorn[standard]==0.29.0",
-    "uvloop==0.19.0",
     "python-multipart==0.0.9",
 
     # ── Data Validation ────────────────────────────────────────────────────────
