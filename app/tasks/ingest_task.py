@@ -1,77 +1,27 @@
-"""Celery task: full document ingestion pipeline with progress events."""
+"""Background task: full document ingestion pipeline with progress events."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import uuid
 from pathlib import Path
 
-from celery import Task
-
+from app.cache.local_cache import set_job_progress
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.tasks.celery_app import celery_app
 
 log = get_logger(__name__)
 
 
-def _run_async(coro):  # type: ignore[no-untyped-def]
-    """Run an async coroutine in the Celery (sync) worker context."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
-
-class _IngestTask(Task):  # type: ignore[type-arg]
-    """Base task class with retry configuration."""
-
-    autoretry_for = (Exception,)
-    max_retries = 3
-    default_retry_delay = 30
-
-
-@celery_app.task(
-    bind=True,
-    base=_IngestTask,
-    name="app.tasks.ingest_task.ingest_document",
-    queue="ingestion",
-)
-def ingest_document(
-    self: Task,
+async def process_document_pipeline(
     document_id: str,
     file_path: str,
     filename: str,
-    owner_id: str,
-) -> dict:
-    """Full ingestion pipeline: parse → chunk → embed → store.
-
-    Progress events (0-100) are published to Redis for SSE polling.
-
-    Args:
-        document_id: UUID of the Document DB record.
-        file_path: Absolute path to the uploaded file.
-        filename: Original filename (used for parsing + citations).
-        owner_id: UUID of the uploading user.
-
-    Returns:
-        Dict with chunk_count, word_count, page_count on success.
-    """
-    return _run_async(_ingest_pipeline(self, document_id, file_path, filename, owner_id))
-
-
-async def _ingest_pipeline(
-    task: Task,
-    document_id: str,
-    file_path: str,
-    filename: str,
-    owner_id: str,
+    file_ext: str,
+    job_id: str,
 ) -> dict:
     """Async implementation of the ingestion pipeline."""
     # Import here to avoid circular imports at module load time
-    from app.cache.redis_client import get_redis_cache
     from app.db.models import Document, DocumentChunk, JobStatus
     from app.db.session import AsyncSessionLocal
     from app.ingestion.chunker import default_chunker
@@ -79,11 +29,8 @@ async def _ingest_pipeline(
     from app.ingestion.parsers import parse_document
     from app.retrieval.vector_store import get_vector_store
 
-    cache = get_redis_cache()
-    job_id = task.request.id or str(uuid.uuid4())
-
     async def update_progress(pct: int, status: JobStatus | None = None) -> None:
-        await cache.set_progress(job_id, pct)
+        await set_job_progress(job_id, status.value if status else "processing", pct)
         if status:
             async with AsyncSessionLocal() as db:
                 doc = await db.get(Document, uuid.UUID(document_id))
@@ -113,12 +60,11 @@ async def _ingest_pipeline(
             raise ValueError("No text extracted — document may be empty or image-only.")
 
         # ── 60%: Embed ────────────────────────────────────────────────────────
-        embedder = EmbeddingService(cache=cache)
+        embedder = EmbeddingService()
         chunk_vector_pairs = await embedder.embed_chunks(chunks)
         await update_progress(60)
 
         # ── 75%: Store vectors ────────────────────────────────────────────────
-        file_ext = Path(filename).suffix.lstrip(".").lower()
         vs = get_vector_store()
         await vs.ensure_collection()
 
@@ -140,7 +86,7 @@ async def _ingest_pipeline(
         )
         await update_progress(75)
 
-        # ── 90%: Persist chunk metadata to Postgres ───────────────────────────
+        # ── 90%: Persist chunk metadata to SQLite ─────────────────────────────
         async with AsyncSessionLocal() as db:
             db_chunks = [
                 DocumentChunk(
@@ -188,4 +134,5 @@ async def _ingest_pipeline(
                 doc.job_status = JobStatus.FAILED
                 doc.error_message = str(exc)[:500]
                 await db.commit()
+        await set_job_progress(job_id, "failed", 0, str(exc))
         raise

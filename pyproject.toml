@@ -12,25 +12,21 @@ authors = [{ name = "RAG System", email = "admin@ragdocsystem.com" }]
 
 dependencies = [
     # ── Web Framework ──────────────────────────────────────────────────────────
-    "fastapi==0.110.3",
-    "uvicorn[standard]==0.29.0",
-    "python-multipart==0.0.9",
+    "fastapi>=0.110.3",
+    "uvicorn[standard]>=0.29.0",
+    "python-multipart>=0.0.9",
 
     # ── Data Validation ────────────────────────────────────────────────────────
-    "pydantic==2.7.1",
-    "pydantic-settings==2.2.1",
+    "pydantic>=2.7.1",
+    "pydantic-settings>=2.2.1",
 
     # ── Database ───────────────────────────────────────────────────────────────
     "sqlalchemy==2.0.30",
-    "asyncpg==0.29.0",
+    "aiosqlite>=0.20.0",
     "alembic==1.13.1",
 
     # ── Task Queue ─────────────────────────────────────────────────────────────
-    "celery[redis]==5.4.0",
-    "flower==2.0.1",
-
-    # ── Cache ──────────────────────────────────────────────────────────────────
-    "redis==5.0.4",
+    # (Removed Celery for native background tasks)
 
     # ── Vector Store ───────────────────────────────────────────────────────────
     "qdrant-client==1.9.1",
@@ -50,7 +46,8 @@ dependencies = [
     "structlog==24.1.0",
 
     # ── Rate Limiting ──────────────────────────────────────────────────────────
-    "slowapi==0.1.9",
+    "slowapi>=0.1.9",
+    "cachetools>=5.3.3",
 
     # ── HTTP ───────────────────────────────────────────────────────────────────
     "httpx==0.27.0",

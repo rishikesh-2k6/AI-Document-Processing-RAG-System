@@ -54,11 +54,10 @@ class VectorStore:
 
     def __init__(
         self,
-        host: str = settings.qdrant_host,
-        port: int = settings.qdrant_port,
+        path: str = settings.qdrant_path,
         collection: str = COLLECTION,
     ) -> None:
-        self._client = AsyncQdrantClient(host=host, port=port)
+        self._client = AsyncQdrantClient(path=path)
         self._collection = collection
 
     # ── Collection lifecycle ──────────────────────────────────────────────────

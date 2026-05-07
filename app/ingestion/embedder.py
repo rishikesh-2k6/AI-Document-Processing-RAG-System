@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from app.cache.redis_client import RedisCache
+from app.cache.local_cache import get_cache, set_cache
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.ingestion.chunker import TextChunk
@@ -51,12 +51,12 @@ class EmbeddingService:
         self,
         model: str = settings.groq_embedding_model,
         batch_size: int = settings.embedding_batch_size,
-        cache: RedisCache | None = None,
+        use_cache: bool = True,
         ollama_url: str = OLLAMA_EMBED_URL,
     ) -> None:
         self.model = model
         self.batch_size = batch_size
-        self._cache = cache
+        self._use_cache = use_cache
         self._ollama_url = ollama_url
 
     # ── Cache helpers ─────────────────────────────────────────────────────────
@@ -68,20 +68,20 @@ class EmbeddingService:
 
     async def _get_cached(self, text: str) -> list[float] | None:
         """Try to retrieve a cached embedding vector."""
-        if self._cache is None:
+        if not self._use_cache:
             return None
         key = self._cache_key(text)
-        raw = await self._cache.get(key)
+        raw = await get_cache(key)
         if raw:
             return json.loads(raw)
         return None
 
     async def _set_cached(self, text: str, vector: list[float]) -> None:
         """Persist embedding vector to cache (TTL = 7 days)."""
-        if self._cache is None:
+        if not self._use_cache:
             return
         key = self._cache_key(text)
-        await self._cache.set(key, json.dumps(vector), ttl=604800)
+        await set_cache(key, json.dumps(vector))
 
     # ── Embedding call ────────────────────────────────────────────────────────
 

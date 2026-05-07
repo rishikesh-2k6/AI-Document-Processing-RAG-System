@@ -15,9 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, DBSession
-from app.cache.redis_client import get_redis_cache
-from app.core.config import settings
-from app.core.logging import get_logger
+from app.cache.local_cache import generate_cache_key, get_cache, set_cache
 from app.db.models import Document, DocumentChunk, JobStatus, QueryLog
 from app.generation.answer import RAGAnswerGenerator
 from app.generation.summarizer import DocumentSummarizer
@@ -125,19 +123,17 @@ async def ask(
     - Each source chunk includes filename, page number, and a 200-char snippet.
     """
     start_ms = int(time.monotonic() * 1000)
-    cache = get_redis_cache()
-    cache_key = _make_cache_key(payload.query, payload.filters, payload.top_k)
+    cache_key = generate_cache_key("ask", query=payload.query, filters=payload.filters)
+    cached_response = await get_cache(cache_key)
 
     # ── Cache hit ─────────────────────────────────────────────────────────────
-    cached = await cache.get_json(cache_key)
-    if cached:
-        await cache.increment("metrics:cache_hits")
+    if cached_response:
         latency = int(time.monotonic() * 1000) - start_ms
         log.info("query_cache_hit", query_preview=payload.query[:60])
-        return AskResponse(**{**cached, "cache_hit": True, "latency_ms": latency})
+        return AskResponse(**{**json.loads(cached_response), "cache_hit": True, "latency_ms": latency})
 
     # ── Embed query ───────────────────────────────────────────────────────────
-    embedder = EmbeddingService(cache=cache)
+    embedder = EmbeddingService()
     query_vectors = await embedder.embed_texts([payload.query])
     query_vector = query_vectors[0]
 
@@ -197,8 +193,7 @@ async def ask(
     }
 
     # ── Cache result ──────────────────────────────────────────────────────────
-    await cache.set_json(cache_key, response_data, ttl=settings.cache_ttl_seconds)
-    await cache.increment("metrics:query_count")
+    await set_cache(cache_key, json.dumps(response_data), ttl=settings.cache_ttl_seconds)
 
     # ── Log query to DB ───────────────────────────────────────────────────────
     log_entry = QueryLog(

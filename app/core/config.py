@@ -39,22 +39,15 @@ class Settings(BaseSettings):
 
     # ── Database ──────────────────────────────────────────────────────────────
     database_url: str = Field(
-        default="postgresql+asyncpg://raguser:ragpassword@localhost:5432/ragdb",
+        default="sqlite+aiosqlite:///./rag.sqlite3",
         alias="DATABASE_URL",
     )
-    db_pool_size: int = Field(default=10, alias="DB_POOL_SIZE")
-    db_max_overflow: int = Field(default=20, alias="DB_MAX_OVERFLOW")
-    db_pool_timeout: int = Field(default=30, alias="DB_POOL_TIMEOUT")
 
-    # ── Redis ─────────────────────────────────────────────────────────────────
-    redis_url: str = Field(
-        default="redis://:redispassword@localhost:6379/0", alias="REDIS_URL"
-    )
+    # ── Cache ─────────────────────────────────────────────────────────────────
     cache_ttl_seconds: int = Field(default=3600, alias="CACHE_TTL_SECONDS")
 
     # ── Qdrant ────────────────────────────────────────────────────────────────
-    qdrant_host: str = Field(default="localhost", alias="QDRANT_HOST")
-    qdrant_port: int = Field(default=6333, alias="QDRANT_PORT")
+    qdrant_path: str = Field(default="./qdrant_storage", alias="QDRANT_PATH")
     qdrant_collection_name: str = Field(
         default="documents", alias="QDRANT_COLLECTION_NAME"
     )
@@ -111,16 +104,6 @@ class Settings(BaseSettings):
     def max_upload_size_bytes(self) -> int:
         """Max file size in bytes."""
         return self.max_upload_size_mb * 1024 * 1024
-
-    @property
-    def celery_broker_url(self) -> str:
-        """Celery broker (Redis)."""
-        return self.redis_url
-
-    @property
-    def celery_result_backend(self) -> str:
-        """Celery result backend (Redis)."""
-        return self.redis_url
 
 
 @lru_cache(maxsize=1)

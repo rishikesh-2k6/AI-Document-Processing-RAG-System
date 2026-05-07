@@ -15,10 +15,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, DBSession
+from app.cache.local_cache import get_job_progress, set_job_progress
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import Document, DocumentChunk, FileType, JobStatus
-from app.tasks.ingest_task import ingest_document
+from app.tasks.ingest_task import process_document_pipeline
 
 log = get_logger(__name__)
 
@@ -125,6 +126,7 @@ def _validate_upload(file: UploadFile) -> str:
 async def upload_document(
     current_user: CurrentUser,
     db: DBSession,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="PDF, DOCX, or EML file"),
 ) -> UploadResponse:
     """Upload a document and queue it for background ingestion.
@@ -160,6 +162,7 @@ async def upload_document(
 
     # Save file to disk
     doc_id = uuid.uuid4()
+    job_id = str(uuid.uuid4())
     safe_name = f"{doc_id}.{ext}"
     file_path = settings.upload_dir / safe_name
     file_path.write_bytes(file_bytes)
@@ -175,27 +178,28 @@ async def upload_document(
         file_path=str(file_path),
         content_hash=content_hash,
         job_status=JobStatus.QUEUED,
+        job_id=job_id,
     )
     db.add(doc)
     await db.flush()
 
-    # Dispatch Celery task
-    task = ingest_document.apply_async(
-        kwargs={
-            "document_id": str(doc_id),
-            "file_path": str(file_path),
-            "filename": file.filename or safe_name,
-            "owner_id": str(current_user.id),
-        }
+    # Set initial progress in memory
+    await set_job_progress(job_id, "pending", 0, "Job queued for processing.")
+
+    # Execute locally in the background event loop
+    background_tasks.add_task(
+        process_document_pipeline,
+        str(doc.id),
+        str(file_path),
+        file.filename,
+        doc.file_type.value,
+        job_id
     )
 
-    doc.job_id = task.id
-    await db.flush()
-
-    log.info("document_queued", doc_id=str(doc_id), job_id=task.id, ext=ext)
+    log.info("document_queued", doc_id=str(doc_id), job_id=job_id, ext=ext)
     return UploadResponse(
         document_id=str(doc_id),
-        job_id=task.id,
+        job_id=job_id,
         filename=file.filename or safe_name,
         message="Document queued for ingestion",
     )
@@ -341,13 +345,11 @@ async def stream_progress(
     job_id = doc.job_id or str(document_id)
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        from app.cache.redis_client import get_redis_cache
-
-        cache = get_redis_cache()
         last_progress = -1
 
         for _ in range(120):  # Max 120 iterations × 0.5s = 60s timeout
-            progress = await cache.get_progress(job_id)
+            progress_data = await get_job_progress(job_id)
+            progress = progress_data.get("progress", 0) if progress_data else 0
             if progress != last_progress:
                 last_progress = progress
                 yield f"data: {progress}\n\n"
